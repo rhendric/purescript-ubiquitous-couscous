@@ -50,11 +50,18 @@ fi
 
 if [ "$last_tag" = "v$package_version" -a "$CI_PRERELEASE" = "true" ]
 then
-  if [ "$(echo ../CHANGELOG.d/breaking_*)" ]
+  if [[ "$package_version" = *-* ]]
+  then
+    # A hyphen indicates a prerelease version. We are already preparing for the
+    # specified release; don't bother bumping any higher version numbers,
+    # regardless of what's in the changelog.
+    bump=prerelease
+  elif [ "$(echo ../CHANGELOG.d/breaking_*)" ]
   then
     # If we ever reach 1.0, change this to premajor
     bump=preminor
   elif [ "$(echo ../CHANGELOG.d/feature_*)" ]
+  then
     # If we ever reach 1.0, change this to preminor
     bump=prerelease
   else
@@ -62,7 +69,7 @@ then
   fi
   tag=$(npm version --no-git-tag-version "$bump")
   prerelease_version=${tag#v}
-  sed -i "s/${package_version//./\\.}/$prerelease_version/g" package.json ../purescript.cabal
+  sed -i -e "s/${package_version//./\\.}/$prerelease_version/g" package.json ../purescript.cabal
   echo "::set-output name=version::$tag"
 else
   echo "::set-output name=version::v$package_version"
