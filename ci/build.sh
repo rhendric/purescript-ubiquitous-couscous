@@ -35,6 +35,41 @@ else
   STACK_OPTS="$STACK_OPTS --fast"
 fi
 
+(echo "::endgroup::"; echo "::group::Determine release version") 2>/dev/null
+
+pushd npm-package
+
+last_tag=$(git ls-remote --tags -q --sort=-version:refname | head -n 1 | cut -f2 | sed 's_refs/tags/__')
+package_version=$(node -pe 'require("./package.json").version')
+
+if ! grep -q "^version:\\s*${package_version//./\\.}$" ../purescript.cabal
+then
+  echo "Version in npm-package/package.json doesn't match version in purescript.cabal"
+  exit 1
+fi
+
+if [ "$last_tag" = "v$package_version" -a "$CI_PRERELEASE" = "true" ]
+then
+  if [ "$(echo ../CHANGELOG.d/breaking_*)" ]
+  then
+    # If we ever reach 1.0, change this to premajor
+    bump=preminor
+  elif [ "$(echo ../CHANGELOG.d/feature_*)" ]
+    # If we ever reach 1.0, change this to preminor
+    bump=prerelease
+  else
+    bump=prerelease
+  fi
+  tag=$(npm version --no-git-tag-version "$bump")
+  prerelease_version=${tag#v}
+  sed -i "s/${package_version//./\\.}/$prerelease_version/g" package.json ../purescript.cabal
+  echo "::set-output name=version::$tag"
+else
+  echo "::set-output name=version::v$package_version"
+fi
+
+popd
+
 (echo "::endgroup::"; echo "::group::Install snapshot dependencies") 2>/dev/null
 
 # Install snapshot dependencies (since these will be cached globally and thus
