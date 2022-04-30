@@ -125,8 +125,8 @@ jobs:
           cd sdist-test
           ../ci/fix-home bundle/build.sh "$bundle_os"
 
-      - name: "(Release/prerelease only) Upload bundle"
-        if: "${{ env.CI_RELEASE == 'true' || (env.CI_PRERELEASE == 'true' && steps.build.outputs.do-not-prerelease != 'true') }}"
+      - name: "(Prerelease only) Upload bundle"
+        if: "${{ env.CI_PRERELEASE == 'true' && steps.build.outputs.do-not-prerelease != 'true' }}"
         uses: "actions/upload-artifact@v3"
         with:
           name: "${{ runner.os }}-bundle"
@@ -145,18 +145,6 @@ jobs:
         with:
           repo-token: "${{ secrets.GITHUB_TOKEN }}"
           files: "sdist-test/bundle/*.{tar.gz,sha}"
-
-  preview-release:
-    runs-on: "ubuntu-latest"
-    needs: "build"
-    if: "${{ github.event_name == 'push' && needs.build.outputs.do-not-prerelease != 'true' }}"
-    steps:
-      - uses: "actions/download-artifact@v3"
-      - uses: "ncipollo/release-action@v1.10.0"
-        with:
-          tag: "${{ needs.build.outputs.version }}"
-          artifacts: "*-bundle/*"
-          prerelease: true
 
   lint:
     runs-on: "ubuntu-latest"
@@ -185,3 +173,37 @@ jobs:
       - run: "ci/fix-home ci/run-hlint.sh --git"
         env:
           VERSION: "2.2.11"
+
+  make-prerelease:
+    runs-on: "ubuntu-latest"
+    needs:
+      - "build"
+      - "lint"
+    if: "${{ github.event_name == 'push' && needs.build.outputs.do-not-prerelease != 'true' }}"
+    steps:
+      - uses: "actions/download-artifact@v3"
+      - uses: "ncipollo/release-action@v1.10.0"
+        with:
+          tag: "${{ needs.build.outputs.version }}"
+          artifacts: "*-bundle/*"
+          prerelease: true
+          body: ""
+      - uses: "actions/checkout@v3"
+      - uses: "actions/setup-node@v3"
+        with:
+          node-version: "16.x"
+          registry-url: "https://npm.pkg.github.com" # TODO: remove this!
+      - name: "Publish npm package"
+        working-directory: "npm-package"
+        env:
+          BUILD_VERSION: "${{ needs.build.outputs.version }}"
+          NODE_AUTH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" # TODO: change this!
+        run: |
+          # TODO: remove this!
+          sed -i -e 's_"name": "purescript"_"name": "@rhendric/purescript"_' package.json
+
+          src_version=$(node -pe 'require("./package.json").version')
+          npm version --allow-same-version "$BUILD_VERSION"
+          sed -i -e "s/--purs-ver=${src_version//./\\.}/--purs-ver=$BUILD_VERSION/" package.json
+          # TODO: remove --access public!
+          npm publish --tag next --access public
