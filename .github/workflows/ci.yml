@@ -131,7 +131,8 @@ jobs:
         with:
           name: "${{ runner.os }}-bundle"
           path: |
-            sdist-test/bundle/*.{tar.gz,sha}
+            sdist-test/bundle/*.sha
+            sdist-test/bundle/*.tar.gz
 
       - name: "(Release only) Publish bundle"
         if: "${{ env.CI_RELEASE == 'true' }}"

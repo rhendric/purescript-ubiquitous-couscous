@@ -62,23 +62,25 @@ then
 fi
 
 function largest-matching-git-tag {
-  printf '%s\n' "${git_tags[@]}" | grep -E "^${1//./\\.}(\\.|$)" | head -n 1
+  grep -E "^${1//./\\.}(\\.|$)" "$git_tags" | head -n 1
 }
 
-mapfile -t git_tags < <(git ls-remote --tags -q --sort=-version:refname | sed 's_^.*refs/tags/__')
+git_tags=$(mktemp)
+trap 'rm "$git_tags"' EXIT
+git ls-remote --tags -q --sort=-version:refname | sed 's_^.*refs/tags/__' > $git_tags
 if [ "$package_prerelease_suffix" ]
 then
   tag=$(largest-matching-git-tag "v$package_release_version${package_prerelease_suffix%%.*}")
   if [ "$tag" ]
   then
-    npm version "$tag"
+    npm version --allow-same-version "$tag"
     build_version=$(npm version --no-git-tag-version prerelease)
     build_version=${build_version#v}
   else
     build_version=$package_version
   fi
 else # (current version does not contain a prerelease suffix)
-  if printf '%s\n' "${git_tags[@]}" | grep -Fqx "v$package_release_version"
+  if grep -Fqx "v$package_release_version" "$git_tags"
   then # (the current version has been published)
     bump=patch
     if compgen -G ../CHANGELOG.d/breaking_* >/dev/null
@@ -91,7 +93,7 @@ else # (current version does not contain a prerelease suffix)
     fi
     next_tag=$(npm version --no-git-tag-version "$bump")
     tag=$(largest-matching-git-tag "$next_tag-[0-9]+")
-    npm version "${tag:-$next_tag}"
+    npm version --allow-same-version "${tag:-$next_tag}"
     build_version=$(npm version --no-git-tag-version prerelease)
     build_version=${build_version#v}
   else # (current version has not been published)
