@@ -110,7 +110,9 @@ if [ "$build_version" != "$package_version" ]
 then
   build_release_version=${build_version%%-*}
   build_prerelease_suffix=${build_version#$build_release_version}
-  sed -i -e "s/--purs-ver=${package_version//./\\.}/--purs-ver=$build_version/" package.json
+  # We don't need to update the install-purescript command before we build;
+  # we'll do that when we publish. All we need to update here are the files
+  # that affect the purs binary.
   sed -i -e "s/${package_release_version//./\\.}/$build_release_version/" ../purescript.cabal
   sed -i -e "s/^prerelease = \"${package_prerelease_suffix//./\\.}\"$/prerelease = \"${build_prerelease_suffix}\"/" ../app/Version.hs
 fi
