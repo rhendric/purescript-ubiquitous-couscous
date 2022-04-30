@@ -146,18 +146,6 @@ jobs:
           repo-token: "${{ secrets.GITHUB_TOKEN }}"
           files: "sdist-test/bundle/*.{tar.gz,sha}"
 
-  preview-release:
-    runs-on: "ubuntu-latest"
-    needs: "build"
-    if: "${{ github.event_name == 'push' && needs.build.outputs.do-not-prerelease != 'true' }}"
-    steps:
-      - uses: "actions/download-artifact@v3"
-      - uses: "ncipollo/release-action@v1.10.0"
-        with:
-          tag: "${{ needs.build.outputs.version }}"
-          artifacts: "*-bundle/*"
-          prerelease: true
-
   lint:
     runs-on: "ubuntu-latest"
     container: "haskell:8.10.7-stretch@sha256:100f8fb7d7d8d64adb5e106fe8136b8d4cbdc03aeb2cbd145a7597d74b69bafb"
@@ -185,3 +173,35 @@ jobs:
       - run: "ci/fix-home ci/run-hlint.sh --git"
         env:
           VERSION: "2.2.11"
+
+  make-prerelease:
+    runs-on: "ubuntu-latest"
+    needs:
+      - "build"
+      - "lint"
+    if: "${{ github.event_name == 'push' && needs.build.outputs.do-not-prerelease != 'true' }}"
+    steps:
+      - uses: "actions/download-artifact@v3"
+      - uses: "ncipollo/release-action@v1.10.0"
+        with:
+          tag: "${{ needs.build.outputs.version }}"
+          artifacts: "*-bundle/*"
+          prerelease: true
+          omitBody: true
+      - uses: "actions/setup-node@v3"
+        with:
+          node-version: "16.x"
+          registry-url: "https://npm.pkg.github.com" # TODO: remove this!
+      - uses: "actions/checkout@v3"
+      - name: "Publish npm package"
+        working-directory: "npm-package"
+        env:
+          BUILD_VERSION: "${{ needs.build.outputs.version }}"
+          NODE_AUTH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" # TODO: change this!
+        run: |
+          package_version=$(npm version)
+          npm version --allow-same-version $BUILD_VERSION
+          echo sed -i -e "s/--purs-ver=${package_version//./\\.}/--purs-ver=$BUILD_VERSION/" package.json
+          sed -i -e "s/--purs-ver=${package_version//./\\.}/--purs-ver=$BUILD_VERSION/" package.json
+
+          npm publish --tag next
