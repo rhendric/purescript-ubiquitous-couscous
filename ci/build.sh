@@ -28,51 +28,89 @@ set -ex
 STACK="stack --no-terminal --haddock --jobs=2"
 
 STACK_OPTS="--test"
-if [ "$CI_RELEASE" = "true" ]
+if [ "$CI_RELEASE" = "true" -o "$CI_PRERELEASE" = "true" ]
 then
   STACK_OPTS="$STACK_OPTS --flag=purescript:RELEASE"
 else
   STACK_OPTS="$STACK_OPTS --fast"
 fi
 
-(echo "::endgroup::"; echo "::group::Determine release version") 2>/dev/null
+(echo "::endgroup::"; echo "::group::Set version number for build") 2>/dev/null
 
 pushd npm-package
 
-last_tag=$(git ls-remote --tags -q --sort=-version:refname | head -n 1 | cut -f2 | sed 's_refs/tags/__')
 package_version=$(node -pe 'require("./package.json").version')
+package_release_version=${package_version%%-*}
+package_prerelease_suffix=${package_version#$package_release_version}
 
-if ! grep -q "^version:\\s*${package_version//./\\.}$" ../purescript.cabal
+if ! grep -q "\"install-purescript --purs-ver=${package_version//./\\.}\"" package.json
+then
+  echo "Version in npm-package/package.json doesn't match version in install-purescript call"
+  exit 1
+fi
+
+if ! grep -q "^version:\\s*${package_release_version//./\\.}$" ../purescript.cabal
 then
   echo "Version in npm-package/package.json doesn't match version in purescript.cabal"
   exit 1
 fi
 
-if [ "$last_tag" = "v$package_version" -a "$CI_PRERELEASE" = "true" ]
+if ! grep -q "^prerelease = \"${package_prerelease_suffix//./\\.}\"$" ../app/Version.hs
 then
-  if [[ "$package_version" = *-* ]]
+  echo "Version in npm-package/package.json doesn't match prerelease in app/Version.hs"
+  exit 1
+fi
+
+function largest-matching-git-tag {
+  printf '%s\n' "${git_tags[@]}" | grep -E "^${1//./\\.}(\\.|$)" | head -n 1
+}
+
+mapfile -t git_tags < <(git ls-remote --tags -q --sort=-version:refname | sed 's_^.*refs/tags/__')
+if [ "$package_prerelease_suffix" ]
+then
+  tag=$(largest-matching-git-tag "v$package_release_version${package_prerelease_suffix%%.*}")
+  if [ "$tag" ]
   then
-    # A hyphen indicates a prerelease version. We are already preparing for the
-    # specified release; don't bother bumping any higher version numbers,
-    # regardless of what's in the changelog.
-    bump=prerelease
-  elif [ "$(echo ../CHANGELOG.d/breaking_*)" ]
-  then
-    # If we ever reach 1.0, change this to premajor
-    bump=preminor
-  elif [ "$(echo ../CHANGELOG.d/feature_*)" ]
-  then
-    # If we ever reach 1.0, change this to preminor
-    bump=prerelease
+    npm version "$tag"
+    build_version=$(npm version --no-git-tag-version prerelease)
+    build_version=${build_version#v}
   else
-    bump=prerelease
+    build_version=$package_version
   fi
-  tag=$(npm version --no-git-tag-version "$bump")
-  prerelease_version=${tag#v}
-  sed -i -e "s/${package_version//./\\.}/$prerelease_version/g" package.json ../purescript.cabal
-  echo "::set-output name=version::$tag"
-else
-  echo "::set-output name=version::v$package_version"
+else # (current version does not contain a prerelease suffix)
+  if printf '%s\n' "${git_tags[@]}" | grep -Fqx "v$package_release_version"
+  then # (the current version has been published)
+    bump=patch
+    if compgen -G ../CHANGELOG.d/breaking_* >/dev/null
+    then
+      # If we ever reach 1.0, change this to major and uncomment the below
+      bump=minor
+    #elif compgen -G ../CHANGELOG.d/feature_* >/dev/null
+    #then
+    #  bump=minor
+    fi
+    next_tag=$(npm version --no-git-tag-version "$bump")
+    tag=$(largest-matching-git-tag "$next_tag-[0-9]+")
+    npm version "${tag:-$next_tag}"
+    build_version=$(npm version --no-git-tag-version prerelease)
+    build_version=${build_version#v}
+  else # (current version has not been published)
+    build_version=$package_version
+    echo "::set-output name=do-not-prerelease::true"
+  fi
+fi
+
+# $build_version now contains the new version number to use (without a 'v'
+# prefix), and package.json has had its version field updated appropriately.
+
+echo "::set-output name=version::v$build_version"
+if [ "$build_version" != "$package_version" ]
+then
+  build_release_version=${build_version%%-*}
+  build_prerelease_suffix=${build_version#$build_release_version}
+  sed -i -e "s/--purs-ver=${package_version//./\\.}/--purs-ver=$build_version/" package.json
+  sed -i -e "s/${package_release_version//./\\.}/$build_release_version/" ../purescript.cabal
+  sed -i -e "s/^prerelease = \"${package_prerelease_suffix//./\\.}\"$/prerelease = \"${build_prerelease_suffix}\"/" ../app/Version.hs
 fi
 
 popd
