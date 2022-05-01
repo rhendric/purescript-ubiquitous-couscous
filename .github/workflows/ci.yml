@@ -17,6 +17,10 @@ env:
   CI_RELEASE: "${{ github.event_name == 'release' }}"
   STACK_VERSION: "2.7.3"
 
+concurrency:
+  group: "${{ github.event_name == 'pull_request' && github.run_id || 'cd' }}"
+  cancel-in-progress: true
+
 jobs:
   build:
     strategy:
