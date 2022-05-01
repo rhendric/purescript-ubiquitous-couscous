@@ -93,8 +93,13 @@ else # (current version does not contain a prerelease suffix)
     fi
     next_tag=$(npm version --no-git-tag-version "$bump")
     tag=$(largest-matching-git-tag "$next_tag-[0-9]+")
-    npm version --allow-same-version "${tag:-$next_tag}"
-    build_version=$(npm version --no-git-tag-version prerelease)
+    if [ "$tag" ]
+    then
+      npm version --allow-same-version "$tag"
+      build_version=$(npm version --no-git-tag-version prerelease)
+    else
+      build_version=$(npm version --allow-same-version "$next_tag-0")
+    fi
     build_version=${build_version#v}
   else # (current version has not been published)
     build_version=$package_version
